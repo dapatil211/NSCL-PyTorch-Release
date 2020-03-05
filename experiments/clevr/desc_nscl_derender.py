@@ -21,11 +21,15 @@ Note that, in order to train this model, one must use the curriculum learning.
 from jacinle.utils.container import GView
 from nscl.models.reasoning_v1 import make_reasoning_v1_configs, ReasoningV1Model
 from nscl.models.utils import canonize_monitors, update_from_loss_module
+import torch.nn.functional as F
+import torch
+from ipdb import set_trace as st
 
 configs = make_reasoning_v1_configs()
 configs.model.vse_known_belong = False
-configs.train.scene_add_supervision = False
+configs.train.scene_add_supervision = True
 configs.train.qa_add_supervision = True
+configs.train.full_scene_supervision = False
 
 
 class Model(ReasoningV1Model):
@@ -36,30 +40,40 @@ class Model(ReasoningV1Model):
         feed_dict = GView(feed_dict)
         monitors, outputs = {}, {}
 
-        f_scene = self.resnet(feed_dict.image)
+        depth = feed_dict.depth
+        depth = F.tanh(depth) * 0.5
+        inp = torch.cat((feed_dict.image, depth.unsqueeze(1)), axis=1)
+
+        f_scene = self.resnet(inp)
         f_sng = self.scene_graph(f_scene, feed_dict.objects, feed_dict.objects_length)
 
         programs = feed_dict.program_qsseq
         programs, buffers, answers = self.reasoning(f_sng, programs, fd=feed_dict)
-        outputs['buffers'] = buffers
-        outputs['answer'] = answers
+        outputs["buffers"] = buffers
+        outputs["answer"] = answers
 
-        update_from_loss_module(monitors, outputs, self.scene_loss(
-            feed_dict, f_sng,
-            self.reasoning.embedding_attribute, self.reasoning.embedding_relation
-        ))
+        update_from_loss_module(
+            monitors,
+            outputs,
+            self.scene_loss(
+                feed_dict,
+                f_sng,
+                self.reasoning.embedding_attribute,
+                self.reasoning.embedding_relation,
+            ),
+        )
         update_from_loss_module(monitors, outputs, self.qa_loss(feed_dict, answers))
 
         canonize_monitors(monitors)
 
         if self.training:
-            loss = monitors['loss/qa']
-            if configs.train.scene_add_supervision:
-                loss = loss + monitors['loss/scene']
+            loss = monitors["loss/qa"]
+            if configs.train.full_scene_supervision:
+                loss = loss + monitors["loss/scene"]
             return loss, monitors, outputs
         else:
-            outputs['monitors'] = monitors
-            outputs['buffers'] = buffers
+            outputs["monitors"] = monitors
+            outputs["buffers"] = buffers
             return outputs
 
 

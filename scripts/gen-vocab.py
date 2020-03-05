@@ -12,22 +12,31 @@ import os.path as osp
 
 from jacinle.cli.argument import JacArgumentParser
 from jacinle.logging import get_logger
-from nscl.datasets import get_available_symbolic_datasets, initialize_dataset, get_symbolic_dataset_builder
+from nscl.datasets import (
+    get_available_symbolic_datasets,
+    initialize_dataset,
+    get_symbolic_dataset_builder,
+)
 
 logger = get_logger(__file__)
 
 parser = JacArgumentParser()
-parser.add_argument('--dataset', required=True, choices=get_available_symbolic_datasets(), help='dataset')
-parser.add_argument('--data-dir', required=True)
-parser.add_argument('--data-scenes-json', type='checked_file')
-parser.add_argument('--data-questions-json', type='checked_file')
-parser.add_argument('--output', required=True)
+parser.add_argument(
+    "--dataset",
+    required=True,
+    choices=get_available_symbolic_datasets(),
+    help="dataset",
+)
+parser.add_argument("--data-dir", required=True)
+parser.add_argument("--data-scenes-json", type="checked_file")
+parser.add_argument("--data-questions-json", type="checked_file")
+parser.add_argument("--output", required=True)
 args = parser.parse_args()
 
 if args.data_scenes_json is None:
-    args.data_scenes_json = osp.join(args.data_dir, 'scenes.json')
+    args.data_scenes_json = osp.join(args.data_dir, "CLEVR_scenes.json")
 if args.data_questions_json is None:
-    args.data_questions_json = osp.join(args.data_dir, 'questions.json')
+    args.data_questions_json = osp.join(args.data_dir, "CLEVR_questions.json")
 args.data_vocab_json = None
 
 
@@ -39,5 +48,5 @@ def main():
     logger.critical('Vocab json dumped at: "{}".'.format(args.output))
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
