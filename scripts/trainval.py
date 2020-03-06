@@ -243,6 +243,18 @@ parser.add_argument(
     help="force the script to use GPUs, useful when there exists on-the-ground devices",
 )
 
+parser.add_argument("--mv", action="store_true", help="Run multiview")
+parser.add_argument(
+    "--num-views", type=int, default=4, help="Number of total views in the dataset"
+)
+parser.add_argument(
+    "--ood-views",
+    nargs="+",
+    type=int,
+    help="Views used to create out of domain test set",
+)
+
+
 args = parser.parse_args()
 
 if args.data_vocab_json is None:
@@ -348,6 +360,18 @@ def main():
     if args.train_split is not None:
         with open(osp.join(args.data_dir, args.train_split)) as f:
             train_idxs = set(json.load(f))
+    else:
+        train_idxs = None
+    if args.val_split is not None and args.val_data_dir is not None:
+        with open(osp.join(args.val_data_dir, args.val_split)) as f:
+            val_idxs = set(json.load(f))
+    else:
+        val_idxs = None
+    if args.test_split is not None and args.test_data_dir is not None:
+        with open(osp.join(args.test_data_dir, args.test_split)) as f:
+            test_idxs = set(json.load(f))
+    else:
+        test_idxs = None
 
     initialize_dataset(args.dataset)
     build_dataset = get_dataset_builder(args.dataset)
@@ -375,11 +399,11 @@ def main():
     #     else int(args.data_split)
     # )
     # train_dataset, validation_dataset = dataset.split_trainval(dataset_split)
-    num_train = args.train_split.split(".")[-2][6:]
-    train_dataset = dataset.filter(
-        lambda question: question["question_index"] in train_idxs,
-        "filter_train_size_{}".format(num_train),
-    )
+    if train_idxs:
+        train_dataset = dataset.filter(
+            lambda question: question["scene_index"] in train_idxs,
+            "filter_train_size_{}".format(len(train_idxs)),
+        )
     val_dataset = None
     if args.val_data_dir is not None:
         val_dataset = build_dataset(
@@ -390,6 +414,11 @@ def main():
             args.val_data_scenes_json,
             args.val_data_questions_json,
         )
+        if val_idxs:
+            val_dataset = val_dataset.filter(
+                lambda question: question["scene_index"] in val_idxs,
+                "filter_val_size_{}".format(len(val_idxs)),
+            )
     test_dataset = None
     if args.test_data_dir is not None:
         test_dataset = build_dataset(
@@ -400,6 +429,23 @@ def main():
             args.test_data_scenes_json,
             args.test_data_questions_json,
         )
+        if test_idxs:
+            test_dataset = test_dataset.filter(
+                lambda question: question["scene_index"] in test_idxs,
+                "filter_val_size_{}".format(len(test_idxs)),
+            )
+        if args.mv:
+            ood_views = set(args.ood_views)
+            id_views = set(range(args.num_views)) - ood_views
+            id_test = test_dataset.filter(
+                lambda question: question["view_id"] in id_views, "id_view"
+            )
+            ood_test = test_dataset.filter(
+                lambda question: question["view_id"] in ood_views, "ood_view"
+            )
+            test_dataset = {"id_test": id_test, "ood_test": ood_test}
+        else:
+            test_dataset = {"test": test_dataset}
 
     main_train(train_dataset, val_dataset, test_dataset)
 
@@ -490,19 +536,29 @@ def main_train(train_dataset, validation_dataset, test_dataset=None):
         args.batch_size, shuffle=False, drop_last=False, nr_workers=args.data_workers
     )
     if test_dataset is not None:
-        test_dataloader = test_dataset.make_dataloader(
-            args.batch_size,
-            shuffle=False,
-            drop_last=False,
-            nr_workers=args.data_workers,
-        )
+        test_dataloader = {
+            dataset: test_dataset[dataset].make_dataloader(
+                args.batch_size,
+                shuffle=False,
+                drop_last=False,
+                nr_workers=args.data_workers,
+            )
+            for dataset in test_dataset
+        }
 
     if args.evaluate:
         meters.reset()
         model.eval()
         validate_epoch(0, trainer, validation_dataloader, meters)
         if test_dataset is not None:
-            validate_epoch(0, trainer, test_dataloader, meters, meter_prefix="test")
+            for dataloader in test_dataloader:
+                validate_epoch(
+                    0,
+                    trainer,
+                    test_dataloader[dataloader],
+                    meters,
+                    meter_prefix=dataloader,
+                )
         logger.critical(
             meters.format_simple(
                 "Validation",
@@ -591,7 +647,14 @@ def main_train(train_dataset, validation_dataset, test_dataset=None):
             trainer.set_learning_rate(args.lr * 0.1)
 
     if test_dataset is not None:
-        validate_epoch(epoch, trainer, test_dataloader, meters, meter_prefix="test")
+        for dataloader in test_dataloader:
+            validate_epoch(
+                epoch,
+                trainer,
+                test_dataloader[dataloader],
+                meters,
+                meter_prefix=dataloader,
+            )
 
 
 def backward_check_nan(self, feed_dict, loss, monitors, output_dict):
@@ -695,8 +758,7 @@ def validate_epoch(epoch, trainer, val_dataloader, meters, meter_prefix="validat
                     {
                         k: v
                         for k, v in meters.val.items()
-                        if (k.startswith("validation") or k.startswith("test"))
-                        and k.count("/") <= 2
+                        if (k.startswith(meter_prefix)) and k.count("/") <= 2
                     },
                     compressed=True,
                 )

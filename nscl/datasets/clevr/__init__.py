@@ -10,13 +10,28 @@
 
 from nscl.datasets.factory import register_dataset
 from .definition import CLEVRDefinition
-from .definition import build_clevr_dataset, build_symbolic_clevr_dataset, \
-        build_concept_retrieval_clevr_dataset, build_concept_quantization_clevr_dataset
+from .definition import (
+    build_clevr_dataset,
+    build_symbolic_clevr_dataset,
+    build_concept_retrieval_clevr_dataset,
+    build_concept_quantization_clevr_dataset,
+    build_clevr_mv_dataset,
+)
 
 register_dataset(
-    'clevr', CLEVRDefinition,
+    "clevr",
+    CLEVRDefinition,
     builder=build_clevr_dataset,
     symbolic_builder=build_symbolic_clevr_dataset,
     concept_retrieval_builder=build_concept_retrieval_clevr_dataset,
-    concept_quantization_builder=build_concept_quantization_clevr_dataset
+    concept_quantization_builder=build_concept_quantization_clevr_dataset,
+)
+
+register_dataset(
+    "clevr_mv",
+    CLEVRDefinition,
+    builder=build_clevr_mv_dataset,
+    symbolic_builder=build_symbolic_clevr_dataset,
+    concept_retrieval_builder=build_concept_retrieval_clevr_dataset,
+    concept_quantization_builder=build_concept_quantization_clevr_dataset,
 )

@@ -35,7 +35,12 @@ from nscl.datasets.common.program_translator import (
 
 logger = get_logger(__file__)
 
-__all__ = ["NSCLDataset", "ConceptRetrievalDataset", "ConceptQuantizationDataset"]
+__all__ = [
+    "NSCLDataset",
+    "NSCLMultiviewDataset",
+    "ConceptRetrievalDataset",
+    "ConceptQuantizationDataset",
+]
 
 
 class NSCLDatasetUnwrapped(FilterableDatasetUnwrapped):
@@ -184,6 +189,53 @@ def load_depth(depth_file):
     return depth
 
 
+VIEWS = ["319_20", "319_33", "319_46", "319_59"]
+
+
+class NSCLMultiviewDatasetUnwrapped(NSCLDatasetUnwrapped):
+    def _get_metainfo(self, index):
+        qid = index // len(VIEWS)
+        view_id = index % len(VIEWS)
+        question = gdef.translate_question(self.questions[qid])
+        scene = gdef.translate_scene(self.scenes[question["image_index"]])
+        question["scene"] = scene
+        question["image_index"] = question["image_index"]
+        question["view_id"] = view_id
+        question["image_filename"] = osp.join(
+            gdef.get_image_filename(scene), VIEWS[view_id] + ".png"
+        )
+        question["question_index"] = qid
+        question["question_tokenized"] = nltk.word_tokenize(question["question"])
+
+        # program section
+        has_program = False
+        if "program_nsclseq" in question:
+            question["program_raw"] = question["program_nsclseq"]
+            question["program_seq"] = question["program_nsclseq"]
+            has_program = True
+        elif "program" in question:
+            question["program_raw"] = question["program"]
+            question["program_seq"] = gdef.program_to_nsclseq(
+                question["program"], question
+            )
+            has_program = True
+
+        if has_program:
+            question["program_tree"] = nsclseq_to_nscltree(question["program_seq"])
+            question["program_qsseq"] = nsclseq_to_nsclqsseq(question["program_seq"])
+            question["program_qstree"] = nscltree_to_nsclqstree(
+                question["program_tree"]
+            )
+            question["question_type"] = question["program_seq"][-1]["op"]
+        else:
+            question["question_type"] = None
+
+        return question
+
+    def __len__(self):
+        return len(VIEWS) * len(self.questions)
+
+
 class NSCLDatsetFilterableView(FilterableDatasetView):
     def filter_program_size_raw(self, max_length):
         def filt(question):
@@ -258,6 +310,10 @@ class NSCLDatsetFilterableView(FilterableDatasetView):
 
 def NSCLDataset(*args, **kwargs):
     return NSCLDatsetFilterableView(NSCLDatasetUnwrapped(*args, **kwargs))
+
+
+def NSCLMultiviewDataset(*args, **kwargs):
+    return NSCLDatsetFilterableView(NSCLMultiviewDatasetUnwrapped(*args, **kwargs))
 
 
 class ConceptRetrievalDatasetUnwrapped(FilterableDatasetUnwrapped):

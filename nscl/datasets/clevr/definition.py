@@ -192,6 +192,36 @@ def build_clevr_dataset(
     return dataset
 
 
+def build_clevr_mv_dataset(
+    args, configs, image_root, depth_root, scenes_json, questions_json
+):
+    import jactorch.transforms.bbox as T
+
+    image_transform = T.Compose(
+        [
+            # T.NormalizeBbox(),
+            # T.Resize(configs.data.image_size),
+            # T.DenormalizeBbox(),
+            T.ToTensor(),
+            T.Lambda(lambda x, y: (x - 0.5, y))
+            # T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+        ]
+    )
+
+    from nscl.datasets.datasets import NSCLMultiviewDataset
+
+    dataset = NSCLMultiviewDataset(
+        scenes_json,
+        questions_json,
+        image_root=image_root,
+        image_transform=image_transform,
+        depth_root=depth_root,
+        vocab_json=args.data_vocab_json,
+    )
+
+    return dataset
+
+
 def build_concept_retrieval_clevr_dataset(
     args, configs, program, image_root, scenes_json
 ):

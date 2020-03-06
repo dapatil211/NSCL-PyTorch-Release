@@ -29,7 +29,7 @@ configs = make_reasoning_v1_configs()
 configs.model.vse_known_belong = False
 configs.train.scene_add_supervision = True
 configs.train.qa_add_supervision = True
-configs.train.full_scene_supervision = False
+configs.train.full_scene_supervision = True
 
 
 class Model(ReasoningV1Model):
