@@ -192,9 +192,10 @@ parser.add_argument(
     metavar="FILE",
     help="val question json file for validation",
 )
-parser.add_argument(
-    "--train-split", default=None, help="val question json file for validation"
-)
+parser.add_argument("--train-split", default=None, help="scene ids for training")
+
+parser.add_argument("--val-split", default=None, help="scene ids for validation")
+parser.add_argument("--test-split", default=None, help="scene ids for testing")
 
 parser.add_argument(
     "--test-data-dir",
@@ -399,9 +400,13 @@ def main():
     #     else int(args.data_split)
     # )
     # train_dataset, validation_dataset = dataset.split_trainval(dataset_split)
+    if args.mv:
+        ood_views = set(args.ood_views)
+        id_views = set(range(args.num_views)) - ood_views
+    train_dataset = dataset
     if train_idxs:
         train_dataset = dataset.filter(
-            lambda question: question["scene_index"] in train_idxs,
+            lambda question: question["image_index"] in train_idxs,
             "filter_train_size_{}".format(len(train_idxs)),
         )
     val_dataset = None
@@ -416,7 +421,7 @@ def main():
         )
         if val_idxs:
             val_dataset = val_dataset.filter(
-                lambda question: question["scene_index"] in val_idxs,
+                lambda question: question["image_index"] in val_idxs,
                 "filter_val_size_{}".format(len(val_idxs)),
             )
     test_dataset = None
@@ -431,21 +436,27 @@ def main():
         )
         if test_idxs:
             test_dataset = test_dataset.filter(
-                lambda question: question["scene_index"] in test_idxs,
+                lambda question: question["image_index"] in test_idxs,
                 "filter_val_size_{}".format(len(test_idxs)),
             )
-        if args.mv:
-            ood_views = set(args.ood_views)
-            id_views = set(range(args.num_views)) - ood_views
-            id_test = test_dataset.filter(
+        test_dataset = {"test": test_dataset}
+    if args.mv:
+
+        train_dataset = train_dataset.filter(
+            lambda question: question["view_id"] in id_views, "id_view"
+        )
+        if val_dataset:
+            val_dataset = val_dataset.filter(
                 lambda question: question["view_id"] in id_views, "id_view"
             )
-            ood_test = test_dataset.filter(
+        if test_dataset:
+            id_test = test_dataset["test"].filter(
+                lambda question: question["view_id"] in id_views, "id_view"
+            )
+            ood_test = test_dataset["test"].filter(
                 lambda question: question["view_id"] in ood_views, "ood_view"
             )
             test_dataset = {"id_test": id_test, "ood_test": ood_test}
-        else:
-            test_dataset = {"test": test_dataset}
 
     main_train(train_dataset, val_dataset, test_dataset)
 

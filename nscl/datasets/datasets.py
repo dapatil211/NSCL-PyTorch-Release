@@ -8,30 +8,31 @@
 # This file is part of NSCL-PyTorch.
 # Distributed under terms of the MIT license.
 
+import copy
+import json
 import os.path as osp
 
+import imageio
 import nltk
 import numpy as np
-from PIL import Image
-import imageio
-
 import torch
+from PIL import Image
+
 import jacinle.io as io
 from jacinle.logging import get_logger
 from jacinle.utils.container import GView
-
-from nscl.datasets.definition import gdef
 from nscl.datasets.common.filterable import (
     FilterableDatasetUnwrapped,
     FilterableDatasetView,
 )
-from nscl.datasets.common.vocab import Vocab
 from nscl.datasets.common.program_translator import (
-    nsclseq_to_nscltree,
-    nsclseq_to_nsclqsseq,
-    nscltree_to_nsclqstree,
     gen_vocab,
+    nsclseq_to_nsclqsseq,
+    nsclseq_to_nscltree,
+    nscltree_to_nsclqstree,
 )
+from nscl.datasets.common.vocab import Vocab
+from nscl.datasets.definition import gdef
 
 logger = get_logger(__file__)
 
@@ -192,21 +193,30 @@ def load_depth(depth_file):
 VIEWS = ["319_20", "319_33", "319_46", "319_59"]
 
 
+def copydict(d):
+    return json.loads(json.dumps(d))
+
+
 class NSCLMultiviewDatasetUnwrapped(NSCLDatasetUnwrapped):
     def _get_metainfo(self, index):
         qid = index // len(VIEWS)
         view_id = index % len(VIEWS)
         question = gdef.translate_question(self.questions[qid])
+        question = copydict(question)
+        question["index"] = index
         scene = gdef.translate_scene(self.scenes[question["image_index"]])
+        scene = copydict(scene)
+        scene["objects_detection"] = scene["objects_detection"][VIEWS[view_id]]
+        for obj in scene["objects"]:
+            obj["mask"] = obj["mask"][VIEWS[view_id]]
         question["scene"] = scene
-        question["image_index"] = question["image_index"]
+        # question["image_index"] = question["image_index"]
         question["view_id"] = view_id
         question["image_filename"] = osp.join(
             gdef.get_image_filename(scene), VIEWS[view_id] + ".png"
         )
         question["question_index"] = qid
         question["question_tokenized"] = nltk.word_tokenize(question["question"])
-
         # program section
         has_program = False
         if "program_nsclseq" in question:
@@ -229,7 +239,6 @@ class NSCLMultiviewDatasetUnwrapped(NSCLDatasetUnwrapped):
             question["question_type"] = question["program_seq"][-1]["op"]
         else:
             question["question_type"] = None
-
         return question
 
     def __len__(self):
@@ -518,4 +527,3 @@ def ConceptQuantizationDataset(*args, **kwargs):
     return ConceptQuantizationDatasetFilterableView(
         ConceptQuantizationDatasetUnwrapped(*args, **kwargs)
     )
-

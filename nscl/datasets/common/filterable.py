@@ -19,6 +19,7 @@ class FilterableDatasetUnwrapped(Dataset):
     """
     A filterable dataset. User can call various `filter_*` operations to obtain a subset of the dataset.
     """
+
     def __init__(self):
         super().__init__()
         self.metainfo_cache = dict()
@@ -56,13 +57,13 @@ class FilterableDatasetView(FilterableDatasetUnwrapped):
 
     @property
     def filter_name(self):
-        return self._filter_name if self._filter_name is not None else '<anonymous>'
+        return self._filter_name if self._filter_name is not None else "<anonymous>"
 
     @property
     def full_filter_name(self):
         if self.indices is not None:
-            return self.owner_dataset.full_filter_name + '/' + self.filter_name
-        return '<original>'
+            return self.owner_dataset.full_filter_name + "/" + self.filter_name
+        return "<original>"
 
     @property
     def filter_func(self):
@@ -78,28 +79,36 @@ class FilterableDatasetView(FilterableDatasetUnwrapped):
             if filter_func(metainfo):
                 indices.append(i)
         if len(indices) == 0:
-            raise ValueError('Filter results in an empty dataset.')
+            raise ValueError("Filter results in an empty dataset.")
         return type(self)(self, indices, filter_name, filter_func)
 
     def random_trim_length(self, length):
         assert length < len(self)
-        logger.info('Randomly trim the dataset: #samples = {}.'.format(length))
+        logger.info("Randomly trim the dataset: #samples = {}.".format(length))
         indices = list(random.choice(len(self), size=length, replace=False))
-        return type(self)(self, indices=indices, filter_name='randomtrim[{}]'.format(length))
+        return type(self)(
+            self, indices=indices, filter_name="randomtrim[{}]".format(length)
+        )
 
     def trim_length(self, length):
         assert length < len(self)
-        logger.info('Trim the dataset: #samples = {}.'.format(length))
-        return type(self)(self, indices=list(range(0, length)), filter_name='trim[{}]'.format(length))
+        logger.info("Trim the dataset: #samples = {}.".format(length))
+        return type(self)(
+            self, indices=list(range(0, length)), filter_name="trim[{}]".format(length)
+        )
 
     def split_trainval(self, split):
         assert split < len(self)
         nr_train = split
         nr_val = len(self) - nr_train
-        logger.info('Split the dataset: #training samples = {}, #validation samples = {}.'.format(nr_train, nr_val))
+        logger.info(
+            "Split the dataset: #training samples = {}, #validation samples = {}.".format(
+                nr_train, nr_val
+            )
+        )
         return (
-                type(self)(self, indices=list(range(0, split)), filter_name='train'),
-                type(self)(self, indices=list(range(split, len(self))), filter_name='val')
+            type(self)(self, indices=list(range(0, split)), filter_name="train"),
+            type(self)(self, indices=list(range(split, len(self))), filter_name="val"),
         )
 
     def split_kfold(self, k):
@@ -108,8 +117,17 @@ class FilterableDatasetView(FilterableDatasetUnwrapped):
 
         for i in range(k):
             yield (
-                    type(self)(self, indices=list(range(0, i * block)) + list(range((i + 1) * block, len(self))), filter_name='fold{}[train]'.format(i + 1)),
-                    type(self)(self, indices=list(range(i * block, (i + 1) * block)), filter_name='fold{}[val]'.format(i + 1))
+                type(self)(
+                    self,
+                    indices=list(range(0, i * block))
+                    + list(range((i + 1) * block, len(self))),
+                    filter_name="fold{}[train]".format(i + 1),
+                ),
+                type(self)(
+                    self,
+                    indices=list(range(i * block, (i + 1) * block)),
+                    filter_name="fold{}[val]".format(i + 1),
+                ),
             )
 
     def __getitem__(self, index):
