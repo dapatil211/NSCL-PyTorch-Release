@@ -658,6 +658,7 @@ def main_train(train_dataset, validation_dataset, test_dataset=None):
             trainer.set_learning_rate(args.lr * 0.1)
 
     if test_dataset is not None:
+        model.eval()
         for dataloader in test_dataloader:
             validate_epoch(
                 epoch,
@@ -666,6 +667,8 @@ def main_train(train_dataset, validation_dataset, test_dataset=None):
                 meters,
                 meter_prefix=dataloader,
             )
+        if not args.debug:
+            meters.dump(args.meter_file)
 
 
 def backward_check_nan(self, feed_dict, loss, monitors, output_dict):
@@ -781,4 +784,3 @@ def validate_epoch(epoch, trainer, val_dataloader, meters, meter_prefix="validat
 
 if __name__ == "__main__":
     main()
-

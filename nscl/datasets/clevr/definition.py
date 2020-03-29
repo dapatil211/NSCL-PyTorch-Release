@@ -24,6 +24,7 @@ logger = get_logger(__file__)
 __all__ = [
     "CLEVRDefinition",
     "build_clevr_dataset",
+    "build_clevr_mv_dataset",
     "build_symbolic_clevr_dataset",
     "build_concept_retrieval_clevr_dataset",
     "build_concept_quantization_clevr_dataset",
@@ -278,4 +279,3 @@ def build_symbolic_clevr_dataset(args):
     )
 
     return dataset
-
