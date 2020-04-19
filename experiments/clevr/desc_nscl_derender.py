@@ -24,9 +24,10 @@ from nscl.models.utils import canonize_monitors, update_from_loss_module
 import torch.nn.functional as F
 import torch
 from ipdb import set_trace as st
+from nscl.datasets.definition import gdef
 
 configs = make_reasoning_v1_configs()
-configs.model.vse_known_belong = False
+configs.model.vse_known_belong = True
 configs.train.scene_add_supervision = True
 configs.train.qa_add_supervision = True
 configs.train.full_scene_supervision = True
@@ -75,6 +76,32 @@ class Model(ReasoningV1Model):
             outputs["monitors"] = monitors
             outputs["buffers"] = buffers
             return outputs
+
+    def add_concept(self, feed_dict):
+        feed_dict = GView(feed_dict)
+        depth = feed_dict.depth
+        depth = F.tanh(depth) * 0.5
+        inp = torch.cat((feed_dict.image, depth.unsqueeze(1)), axis=1)
+        f_scene = self.resnet(inp)
+        f_sng = self.scene_graph(f_scene, feed_dict.objects, feed_dict.objects_length)
+        prototype_features = f_sng[0][1]
+
+        attribute = feed_dict.attribute_name[0]
+        concept = feed_dict.concept_name[0]
+        gdef.attribute_concepts[attribute].append(concept)
+        # self.scene_loss.used_concepts["attribute"][attribute].append(concept)
+        attribute_taxonomy = self.reasoning.embedding_attribute
+        attribute_taxonomy.init_concept(
+            concept,
+            configs.model.vse_hidden_dims[1],
+            known_belong=attribute if configs.model.vse_known_belong else None,
+        )
+        concept_initialization = attribute_taxonomy.get_attribute(attribute)(
+            prototype_features
+        )
+        with torch.no_grad():
+            embedding = attribute_taxonomy.get_concept(concept).embedding
+            embedding.data = torch.reshape(concept_initialization, embedding.shape)
 
 
 def make_model(args, vocab):

@@ -34,6 +34,7 @@ from nscl.datasets import (
     get_available_datasets,
     initialize_dataset,
     get_dataset_builder,
+    create_prototype_dataset,
 )
 
 logger = get_logger(__file__)
@@ -458,10 +459,50 @@ def main():
             )
             test_dataset = {"id_test": id_test, "ood_test": ood_test}
 
-    main_train(train_dataset, val_dataset, test_dataset)
+    prototype_dataset = create_prototype_dataset(
+        "projects/data/clevr_nscl/one_shot_protos"
+    )
+    one_shot_root = "/projects/data/clevr_nscl/one_shot_test"
+    one_shot_dataset = build_dataset(
+        args,
+        configs,
+        one_shot_root + "/images",
+        one_shot_root + "/depth",
+        one_shot_root + "/CLEVR_scenes_annotated_aligned.json",
+        one_shot_root + "/CLEVR_questions.json",
+    )
+    main_train(
+        train_dataset, val_dataset, test_dataset, prototype_dataset, one_shot_dataset
+    )
+    # main_one_shot(prototype_dataset, one_shot_dataset)
 
 
-def main_train(train_dataset, validation_dataset, test_dataset=None):
+def main_one_shot(
+    prototype_dataset, one_shot_dataset, model, epoch, trainer, meters, batch
+):
+    proto_loader = prototype_dataset.make_dataloader(1, False)
+    proto_iterator = iter(proto_loader)
+
+    for feed_dict in proto_iterator:
+        model.add_concept(feed_dict)
+
+    model.eval()
+    validate_epoch(
+        epoch,
+        trainer,
+        one_shot_dataset.make_dataloader(batch, False),
+        meters,
+        meter_prefix="one_shot",
+    )
+
+
+def main_train(
+    train_dataset,
+    validation_dataset,
+    test_dataset=None,
+    prototype_dataset=None,
+    one_shot_dataset=None,
+):
     logger.critical("Building the model.")
     model = desc.make_model(args, train_dataset.unwrapped.vocab)
 
@@ -669,6 +710,15 @@ def main_train(train_dataset, validation_dataset, test_dataset=None):
             )
         if not args.debug:
             meters.dump(args.meter_file)
+    main_one_shot(
+        prototype_dataset,
+        one_shot_dataset,
+        model,
+        epoch,
+        trainer,
+        meters,
+        args.batch_size,
+    )
 
 
 def backward_check_nan(self, feed_dict, loss, monitors, output_dict):

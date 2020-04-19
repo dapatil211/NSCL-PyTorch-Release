@@ -15,3 +15,4 @@ import nscl.datasets.clevr
 
 from .definition import *
 from .factory import *
+from .datasets import create_prototype_dataset

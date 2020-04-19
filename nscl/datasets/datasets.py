@@ -41,7 +41,139 @@ __all__ = [
     "NSCLMultiviewDataset",
     "ConceptRetrievalDataset",
     "ConceptQuantizationDataset",
+    "create_prototype_dataset",
 ]
+
+
+class ProtoDataset(FilterableDatasetUnwrapped):
+    def __init__(self, scenes_path, image_root, depth_root):
+
+        self.scenes_path = scenes_path
+        self.image_root = image_root
+        self.depth_root = depth_root
+
+        self.scenes = np.load(scenes_path, allow_pickle=True)
+        self.scenes = {key: self.scenes[key] for key in self.scenes.files}
+        self.im_id_to_scene_id = {
+            self.scenes["image_index"][idx]: idx
+            for idx in range(len(self.scenes["image_index"]))
+        }
+        self.metainfo_cache = dict()
+
+    def get_metainfo(self, index):
+        # index = self.data_idxs[index]
+        if index not in self.metainfo_cache:
+            question = {"image_index": index}
+            scene = {
+                key: self.scenes[key][self.im_id_to_scene_id[question["image_index"]]]
+                for key in self.scenes
+            }
+            question["scene"] = scene
+            self.metainfo_cache[index] = question
+
+        return self.metainfo_cache[index]
+
+    def __len__(self):
+        return len(self.im_id_to_scene_id)
+
+    def __getitem__(self, index):
+        # index = index % 200
+        metainfo = GView(self.get_metainfo(index))
+        metainfo.view_id = 1
+        feed_dict = GView()
+        feed_dict.scene = metainfo.scene
+        feed_dict.update(gdef.annotate_objects(metainfo.scene))
+        # feed_dict.objects_raw = feed_dict.objects.copy()
+        feed_dict.update(gdef.annotate_scene(metainfo.scene))
+        feed_dict.image_index = metainfo.image_index
+        feed_dict.image_filename = metainfo.scene["image_filename"]
+        # image_base_name = feed_dict.image_filename.split(".")[0]
+        image_base_name = f"{feed_dict.image_filename}/{VIEWS[metainfo.view_id]}"
+
+        feed_dict.image = Image.open(
+            osp.join(self.image_root, f"{image_base_name}.png")
+        ).convert("RGB")
+        feed_dict.image = self.image_transform(feed_dict.image).unsqueeze(0)
+        feed_dict.depth = imageio.imread(
+            osp.join(self.depth_root, f"{image_base_name}.exr"), format="EXR-FI"
+        )[:, :, 0]
+        feed_dict.depth = self.depth_transform(feed_dict.depth)
+        feed_dict.attribute_name = "shape"
+        feed_dict.concept_name = metainfo.scene["shape"][0]
+        # program
+
+        # Scene
+        feed_dict.bboxes = torch.tensor(feed_dict.scene["obj_bboxes"][0]).reshape(-1, 9)
+        # feed_dict.bboxes_len = torch.tensor(feed_dict.bboxes.size(0))
+        feed_dict.pix_T_cam = torch.tensor(metainfo.scene["pix_T_cams"]).float()
+        feed_dict.origin_T_cam = torch.tensor(
+            metainfo.scene["origin_T_cams"][metainfo.view_id]
+        ).float()
+        return feed_dict.toDict()
+
+    # def __len__(self):
+    #     return self.nRecords
+
+    def depth_transform(self, depth):
+        transform = T.Compose(
+            [
+                # T.Resize(self.image_size),
+                T.ToTensor(),
+                T.Lambda(lambda x: x * 100.0),
+            ]
+        )
+
+        return transform(depth)
+
+    def image_transform(self, image):
+        image_transform = T.Compose(
+            [
+                # T.Resize(self.image_size),
+                T.ToTensor(),
+                T.Lambda(lambda x: x - 0.5)
+                # T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ]
+        )
+        return image_transform(image)
+
+
+def create_prototype_dataset(prototype_path):
+    # Create Prototype dataset
+    dataset_path = prototype_path
+    processed_data = osp.join(dataset_path, "npzs")
+    scenes_path = osp.join(processed_data, "scenes.npz")
+    image_root = osp.join(dataset_path, "images")
+    depth_root = osp.join(dataset_path, "depth")
+    prototpye_dataset = ProtoDataset(scenes_path, image_root, depth_root)
+
+    # Create one-shot dataset
+    # dataset_path = one_shot_path
+    # processed_data = os.path.join(dataset_path, "npzs")
+    # questions_path = os.path.join(processed_data, "questions.npz")
+    # scenes_path = os.path.join(processed_data, "scenes.npz")
+    # image_root = os.path.join(dataset_path, "images")
+    # depth_root = os.path.join(dataset_path, "depth")
+    # # split = os.path.join(dataset_path, "splits", 'one_shot.json')
+    # # shuffle = hyp.shuffles[set_name]
+    # # collate_guide = create_collate_guide()
+    # # with open(split) as f:
+    # #     scene_idxs = set(json.load(f))
+    # full_dataset = FilterableDataset(
+    #     NSCLMultiviewDatasetUnwrapped(
+    #         None,
+    #         questions_path,
+    #         scenes_path,
+    #         processed_data,
+    #         image_root,
+    #         depth_root,
+    #         (hyp.image_size),
+    #     )
+    # )
+    # full_dataset = full_dataset.filter(
+    #     lambda metainfo: metainfo["image_index"] in scene_idxs,
+    #     "data_regime_filter",
+    # )
+    return prototpye_dataset  # , full_dataset
 
 
 class NSCLDatasetUnwrapped(FilterableDatasetUnwrapped):
