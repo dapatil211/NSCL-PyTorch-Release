@@ -83,6 +83,7 @@ class ReasoningV1Model(nn.Module):
             ),
             self.scene_graph.output_dims,
             configs.model.vse_hidden_dims,
+            vse_attribute_agnostic=True,
         )
 
         import nscl.nn.reasoning_v1.losses as vqa_losses

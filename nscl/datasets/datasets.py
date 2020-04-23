@@ -46,35 +46,52 @@ __all__ = [
 
 
 class ProtoDataset(FilterableDatasetUnwrapped):
-    def __init__(self, scenes_path, image_root, depth_root):
+    def __init__(self, scenes_json, image_root, depth_root, incl_scene=True):
 
-        self.scenes_path = scenes_path
+        super().__init__()
+
+        self.scenes_json = scenes_json
         self.image_root = image_root
         self.depth_root = depth_root
+        self.incl_scene = incl_scene
 
-        self.scenes = np.load(scenes_path, allow_pickle=True)
-        self.scenes = {key: self.scenes[key] for key in self.scenes.files}
-        self.im_id_to_scene_id = {
-            self.scenes["image_index"][idx]: idx
-            for idx in range(len(self.scenes["image_index"]))
-        }
-        self.metainfo_cache = dict()
+        logger.info('Loading scenes from: "{}".'.format(self.scenes_json))
+        self.scenes = io.load_json(self.scenes_json)["scenes"]
+        import jactorch.transforms.bbox as T
 
-    def get_metainfo(self, index):
+        self.image_transform = T.Compose(
+            [
+                # T.NormalizeBbox(),
+                # T.Resize(configs.data.image_size),
+                # T.DenormalizeBbox(),
+                T.ToTensor(),
+                T.Lambda(lambda x, y: (x - 0.5, y))
+                # T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ]
+        )
+
+    def _get_metainfo(self, index):
         # index = self.data_idxs[index]
-        if index not in self.metainfo_cache:
-            question = {"image_index": index}
-            scene = {
-                key: self.scenes[key][self.im_id_to_scene_id[question["image_index"]]]
-                for key in self.scenes
-            }
-            question["scene"] = scene
-            self.metainfo_cache[index] = question
+        view_id = 1
+        question = {}
+        question["index"] = index
+        question["image_index"] = index
 
-        return self.metainfo_cache[index]
+        scene = gdef.translate_scene(self.scenes[index])
+        scene = copydict(scene)
+        scene["objects_detection"] = scene["objects_detection"][VIEWS[view_id]]
+        for obj in scene["objects"]:
+            obj["mask"] = obj["mask"][VIEWS[view_id]]
+        question["scene"] = scene
+        # question["image_index"] = question["image_index"]
+        question["view_id"] = view_id
+        question["image_filename"] = osp.join(
+            gdef.get_image_filename(scene), VIEWS[view_id] + ".png"
+        )
+        return question
 
     def __len__(self):
-        return len(self.im_id_to_scene_id)
+        return len(self.scenes)
 
     def __getitem__(self, index):
         # index = index % 200
@@ -82,69 +99,87 @@ class ProtoDataset(FilterableDatasetUnwrapped):
         metainfo.view_id = 1
         feed_dict = GView()
         feed_dict.scene = metainfo.scene
-        feed_dict.update(gdef.annotate_objects(metainfo.scene))
-        # feed_dict.objects_raw = feed_dict.objects.copy()
-        feed_dict.update(gdef.annotate_scene(metainfo.scene))
-        feed_dict.image_index = metainfo.image_index
-        feed_dict.image_filename = metainfo.scene["image_filename"]
-        # image_base_name = feed_dict.image_filename.split(".")[0]
-        image_base_name = f"{feed_dict.image_filename}/{VIEWS[metainfo.view_id]}"
-
-        feed_dict.image = Image.open(
-            osp.join(self.image_root, f"{image_base_name}.png")
-        ).convert("RGB")
-        feed_dict.image = self.image_transform(feed_dict.image).unsqueeze(0)
-        feed_dict.depth = imageio.imread(
-            osp.join(self.depth_root, f"{image_base_name}.exr"), format="EXR-FI"
-        )[:, :, 0]
-        feed_dict.depth = self.depth_transform(feed_dict.depth)
         feed_dict.attribute_name = "shape"
-        feed_dict.concept_name = metainfo.scene["shape"][0]
+        feed_dict.concept_name = metainfo.scene["objects"][0][feed_dict.attribute_name]
+        if self.incl_scene:
+            feed_dict.scene = metainfo.scene
+            feed_dict.update(gdef.annotate_objects(metainfo.scene))
+            if "objects" in feed_dict:
+                # NB(Jiayuan Mao): in some datasets, object information might be completely unavailable.
+                feed_dict.objects_raw = feed_dict.objects.copy()
+            feed_dict.update(gdef.annotate_scene(metainfo.scene))
+
+        # image
+        feed_dict.image_index = metainfo.image_index
+        feed_dict.image_filename = metainfo.image_filename
+        if self.image_root is not None and feed_dict.image_filename is not None:
+            feed_dict.image = Image.open(
+                osp.join(self.image_root, feed_dict.image_filename)
+            ).convert("RGB")
+            feed_dict.image, feed_dict.objects = self.image_transform(
+                feed_dict.image, feed_dict.objects
+            )
+        if self.depth_root is not None and feed_dict.image_filename is not None:
+            depth_filename = feed_dict.image_filename.split(".")[0] + ".exr"
+            feed_dict.depth = torch.tensor(
+                load_depth(osp.join(self.depth_root, depth_filename))
+            )
         # program
 
         # Scene
-        feed_dict.bboxes = torch.tensor(feed_dict.scene["obj_bboxes"][0]).reshape(-1, 9)
-        # feed_dict.bboxes_len = torch.tensor(feed_dict.bboxes.size(0))
-        feed_dict.pix_T_cam = torch.tensor(metainfo.scene["pix_T_cams"]).float()
-        feed_dict.origin_T_cam = torch.tensor(
-            metainfo.scene["origin_T_cams"][metainfo.view_id]
-        ).float()
-        return feed_dict.toDict()
+        # feed_dict.bboxes = torch.tensor(feed_dict.scene["obj_bboxes"][0]).reshape(-1, 9)
+        # # feed_dict.bboxes_len = torch.tensor(feed_dict.bboxes.size(0))
+        # feed_dict.pix_T_cam = torch.tensor(metainfo.scene["pix_T_cams"]).float()
+        # feed_dict.origin_T_cam = torch.tensor(
+        #     metainfo.scene["origin_T_cams"][metainfo.view_id]
+        # ).float()
+        return feed_dict.raw()
 
-    # def __len__(self):
-    #     return self.nRecords
+    def make_dataloader(self, batch_size, shuffle, drop_last, nr_workers):
+        from jactorch.data.dataloader import JacDataLoader
+        from jactorch.data.collate import VarLengthCollateV2
 
-    def depth_transform(self, depth):
-        transform = T.Compose(
-            [
-                # T.Resize(self.image_size),
-                T.ToTensor(),
-                T.Lambda(lambda x: x * 100.0),
-            ]
+        collate_guide = {
+            "scene": "skip",
+            "objects_raw": "skip",
+            "objects": "concat",
+            "image_index": "skip",
+            "image_filename": "skip",
+            "question_index": "skip",
+            "question_metainfo": "skip",
+            "question_raw": "skip",
+            "question_raw_tokenized": "skip",
+            "question": "pad",
+            "program_raw": "skip",
+            "program_seq": "skip",
+            "program_tree": "skip",
+            "program_qsseq": "skip",
+            "program_qstree": "skip",
+            "question_type": "skip",
+            "answer": "skip",
+            "attribute_name": "skip",
+            "concept_name": "skip",
+        }
+
+        gdef.update_collate_guide(collate_guide)
+
+        return JacDataLoader(
+            self,
+            batch_size=batch_size,
+            shuffle=shuffle,
+            drop_last=drop_last,
+            num_workers=nr_workers,
+            pin_memory=True,
+            collate_fn=VarLengthCollateV2(collate_guide),
         )
-
-        return transform(depth)
-
-    def image_transform(self, image):
-        image_transform = T.Compose(
-            [
-                # T.Resize(self.image_size),
-                T.ToTensor(),
-                T.Lambda(lambda x: x - 0.5)
-                # T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
-            ]
-        )
-        return image_transform(image)
 
 
 def create_prototype_dataset(prototype_path):
     # Create Prototype dataset
-    dataset_path = prototype_path
-    processed_data = osp.join(dataset_path, "npzs")
-    scenes_path = osp.join(processed_data, "scenes.npz")
-    image_root = osp.join(dataset_path, "images")
-    depth_root = osp.join(dataset_path, "depth")
-    prototpye_dataset = ProtoDataset(scenes_path, image_root, depth_root)
+    scenes_path = osp.join(prototype_path, "CLEVR_annotated_aligned.json")
+    image_root = osp.join(prototype_path, "images")
+    depth_root = osp.join(prototype_path, "depth")
+    prototype_dataset = ProtoDataset(scenes_path, image_root, depth_root)
 
     # Create one-shot dataset
     # dataset_path = one_shot_path
@@ -173,7 +208,7 @@ def create_prototype_dataset(prototype_path):
     #     lambda metainfo: metainfo["image_index"] in scene_idxs,
     #     "data_regime_filter",
     # )
-    return prototpye_dataset  # , full_dataset
+    return prototype_dataset  # , full_dataset
 
 
 class NSCLDatasetUnwrapped(FilterableDatasetUnwrapped):

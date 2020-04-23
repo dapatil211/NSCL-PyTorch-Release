@@ -20,9 +20,7 @@ import jactorch.nn as jacnn
 
 from jacinle.utils.cache import cached_property
 
-__all__ = [
-    'AttributeBlock', 'ConceptBlock', 'ConceptEmbedding'
-]
+__all__ = ["AttributeBlock", "ConceptBlock", "ConceptEmbedding"]
 
 
 """QAS mode: if True, when judging if two objects are of same color, consider all concepts belongs to `color`."""
@@ -37,6 +35,7 @@ def set_query_assisted_same(value):
 
 class AttributeBlock(nn.Module):
     """Attribute as a neural operator."""
+
     def __init__(self, input_dim, output_dim):
         super().__init__()
         self.input_dim = input_dim
@@ -48,6 +47,7 @@ class ConceptBlock(nn.Module):
     """
     Concept as an embedding in the corresponding attribute space.
     """
+
     def __init__(self, embedding_dim, nr_attributes, attribute_agnostic=False):
         """
 
@@ -125,15 +125,21 @@ class ConceptEmbedding(nn.Module):
         return {a: i for i, a in enumerate(self.all_attributes)}
 
     def init_attribute(self, identifier, input_dim, output_dim):
-        assert self.nr_concepts == 0, 'Can not register attributes after having registered any concepts.'
-        self.attribute_operators.add_module('attribute_' + identifier, AttributeBlock(input_dim, output_dim))
+        assert (
+            self.nr_concepts == 0
+        ), "Can not register attributes after having registered any concepts."
+        self.attribute_operators.add_module(
+            "attribute_" + identifier, AttributeBlock(input_dim, output_dim)
+        )
         self.all_attributes.append(identifier)
         # TODO(Jiayuan Mao @ 11/08): remove this sorting...
         self.all_attributes.sort()
 
     def init_concept(self, identifier, input_dim, known_belong=None):
-        block = ConceptBlock(input_dim, self.nr_attributes, attribute_agnostic=self.attribute_agnostic)
-        self.concept_embeddings.add_module('concept_' + identifier, block)
+        block = ConceptBlock(
+            input_dim, self.nr_attributes, attribute_agnostic=self.attribute_agnostic
+        )
+        self.concept_embeddings.add_module("concept_" + identifier, block)
         if known_belong is not None:
             block.set_belong(self.attribute2id[known_belong])
         self.all_concepts.append(identifier)
@@ -149,20 +155,24 @@ class ConceptEmbedding(nn.Module):
         return class_based
 
     def get_attribute(self, identifier):
-        x = getattr(self.attribute_operators, 'attribute_' + identifier)
+        x = getattr(self.attribute_operators, "attribute_" + identifier)
         return x.map
 
     def get_all_attributes(self):
         return [self.get_attribute(a) for a in self.all_attributes]
 
     def get_concept(self, identifier):
-        return getattr(self.concept_embeddings, 'concept_' + identifier)
+        return getattr(self.concept_embeddings, "concept_" + identifier)
 
     def get_all_concepts(self):
         return {c: self.get_concept(c) for c in self.all_concepts}
 
     def get_concepts_by_attribute(self, identifier):
-        return self.get_attribute(identifier), self.get_all_concepts(), self.attribute2id[identifier]
+        return (
+            self.get_attribute(identifier),
+            self.get_all_concepts(),
+            self.attribute2id[identifier],
+        )
 
     _margin = 0.85
     _margin_cross = 0.5
@@ -175,10 +185,14 @@ class ConceptEmbedding(nn.Module):
         # shape: [batch, attributes, channel] or [attributes, channel]
         query_mapped = torch.stack([m(query) for m in mappings], dim=-2)
         query_mapped = query_mapped / query_mapped.norm(2, dim=-1, keepdim=True)
-        reference = jactorch.add_dim_as_except(concept.normalized_embedding, query_mapped, -2, -1)
+        reference = jactorch.add_dim_as_except(
+            concept.normalized_embedding, query_mapped, -2, -1
+        )
 
         margin = self._margin
-        logits = ((query_mapped * reference).sum(dim=-1) - 1 + margin) / margin / self._tau
+        logits = (
+            ((query_mapped * reference).sum(dim=-1) - 1 + margin) / margin / self._tau
+        )
 
         belong = jactorch.add_dim_as_except(concept.log_normalized_belong, logits, -1)
         logits = jactorch.logsumexp(logits + belong, dim=-1)
@@ -220,10 +234,10 @@ class ConceptEmbedding(nn.Module):
 
                 belong_score = v.normalized_belong[attr_id]
                 # TODO(Jiayuan Mao @ 08/10): this line may have numerical issue.
-                mask = logits_or(
-                    logits_and(mask1, mask2),
-                    logits_and(-mask1, -mask2),
-                ) * belong_score
+                mask = (
+                    logits_or(logits_and(mask1, mask2), logits_and(-mask1, -mask2),)
+                    * belong_score
+                )
 
                 masks.append(mask)
             logits2 = torch.stack(masks, dim=-1).sum(dim=-1)
@@ -265,4 +279,3 @@ class ConceptEmbedding(nn.Module):
 
         masks = torch.stack(masks, dim=-1)
         return masks, word2idx
-

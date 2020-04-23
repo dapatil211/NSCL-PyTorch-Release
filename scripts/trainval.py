@@ -387,29 +387,29 @@ def main():
         args.data_questions_json,
     )
 
-    dataset_trim = (
-        int(len(dataset) * args.data_trim)
-        if args.data_trim <= 1
-        else int(args.data_trim)
-    )
-    if dataset_trim > 0:
-        dataset = dataset.trim_length(dataset_trim)
-
-    # dataset_split = (
-    #     int(len(dataset) * args.data_split)
-    #     if args.data_split <= 1
-    #     else int(args.data_split)
+    # dataset_trim = (
+    #     int(len(dataset) * args.data_trim)
+    #     if args.data_trim <= 1
+    #     else int(args.data_trim)
     # )
-    # train_dataset, validation_dataset = dataset.split_trainval(dataset_split)
-    if args.mv:
-        ood_views = set(args.ood_views)
-        id_views = set(range(args.num_views)) - ood_views
+    # if dataset_trim > 0:
+    #     dataset = dataset.trim_length(dataset_trim)
+
+    # # dataset_split = (
+    # #     int(len(dataset) * args.data_split)
+    # #     if args.data_split <= 1
+    # #     else int(args.data_split)
+    # # )
+    # # train_dataset, validation_dataset = dataset.split_trainval(dataset_split)
+    # if args.mv:
+    #     ood_views = set(args.ood_views)
+    #     id_views = set(range(args.num_views)) - ood_views
     train_dataset = dataset
-    if train_idxs:
-        train_dataset = dataset.filter(
-            lambda question: question["image_index"] in train_idxs,
-            "filter_train_size_{}".format(len(train_idxs)),
-        )
+    # if train_idxs:
+    #     train_dataset = dataset.filter(
+    #         lambda question: question["image_index"] in train_idxs,
+    #         "filter_train_size_{}".format(len(train_idxs)),
+    #     )
     val_dataset = None
     if args.val_data_dir is not None:
         val_dataset = build_dataset(
@@ -420,11 +420,11 @@ def main():
             args.val_data_scenes_json,
             args.val_data_questions_json,
         )
-        if val_idxs:
-            val_dataset = val_dataset.filter(
-                lambda question: question["image_index"] in val_idxs,
-                "filter_val_size_{}".format(len(val_idxs)),
-            )
+    #     if val_idxs:
+    #         val_dataset = val_dataset.filter(
+    #             lambda question: question["image_index"] in val_idxs,
+    #             "filter_val_size_{}".format(len(val_idxs)),
+    #         )
     test_dataset = None
     if args.test_data_dir is not None:
         test_dataset = build_dataset(
@@ -435,34 +435,33 @@ def main():
             args.test_data_scenes_json,
             args.test_data_questions_json,
         )
-        if test_idxs:
-            test_dataset = test_dataset.filter(
-                lambda question: question["image_index"] in test_idxs,
-                "filter_val_size_{}".format(len(test_idxs)),
-            )
-        test_dataset = {"test": test_dataset}
-    if args.mv:
-
-        train_dataset = train_dataset.filter(
-            lambda question: question["view_id"] in id_views, "id_view"
-        )
-        if val_dataset:
-            val_dataset = val_dataset.filter(
-                lambda question: question["view_id"] in id_views, "id_view"
-            )
-        if test_dataset:
-            id_test = test_dataset["test"].filter(
-                lambda question: question["view_id"] in id_views, "id_view"
-            )
-            ood_test = test_dataset["test"].filter(
-                lambda question: question["view_id"] in ood_views, "ood_view"
-            )
-            test_dataset = {"id_test": id_test, "ood_test": ood_test}
+    #     if test_idxs:
+    #         test_dataset = test_dataset.filter(
+    #             lambda question: question["image_index"] in test_idxs,
+    #             "filter_val_size_{}".format(len(test_idxs)),
+    #         )
+    #     test_dataset = {"test": test_dataset}
+    # if args.mv:
+    #     # train_dataset = train_dataset.filter(
+    #     #     lambda question: question["view_id"] in id_views, "id_view"
+    #     # )
+    #     if val_dataset:
+    #         val_dataset = val_dataset.filter(
+    #             lambda question: question["view_id"] in id_views, "id_view"
+    #         )
+    #     if test_dataset:
+    #         id_test = test_dataset["test"].filter(
+    #             lambda question: question["view_id"] in id_views, "id_view"
+    #         )
+    #         ood_test = test_dataset["test"].filter(
+    #             lambda question: question["view_id"] in ood_views, "ood_view"
+    #         )
+    #         test_dataset = {"id_test": id_test, "ood_test": ood_test}
 
     prototype_dataset = create_prototype_dataset(
-        "projects/data/clevr_nscl/one_shot_protos"
+        "/projects/data/clevr_nscl/one_shot_protos"
     )
-    one_shot_root = "/projects/data/clevr_nscl/one_shot_test"
+    one_shot_root = "/projects/data/clevr_nscl/one_shot_test_only"
     one_shot_dataset = build_dataset(
         args,
         configs,
@@ -477,20 +476,28 @@ def main():
     # main_one_shot(prototype_dataset, one_shot_dataset)
 
 
+from nscl.datasets.definition import gdef
+
+
 def main_one_shot(
     prototype_dataset, one_shot_dataset, model, epoch, trainer, meters, batch
 ):
-    proto_loader = prototype_dataset.make_dataloader(1, False)
+    gdef.attribute_concepts["shape"].append("pepper")
+    gdef.attribute_concepts["shape"].append("garlic")
+    gdef.attribute_concepts["shape"].append("cheese")
+    proto_loader = prototype_dataset.make_dataloader(
+        1, False, drop_last=True, nr_workers=1
+    )
     proto_iterator = iter(proto_loader)
-
     for feed_dict in proto_iterator:
+        feed_dict = async_copy_to(feed_dict, 0)
         model.add_concept(feed_dict)
-
+    model = model.cuda()
     model.eval()
     validate_epoch(
         epoch,
         trainer,
-        one_shot_dataset.make_dataloader(batch, False),
+        one_shot_dataset.make_dataloader(batch, False, drop_last=True, nr_workers=4),
         meters,
         meter_prefix="one_shot",
     )
@@ -588,36 +595,48 @@ def main_train(
         args.batch_size, shuffle=False, drop_last=False, nr_workers=args.data_workers
     )
     if test_dataset is not None:
-        test_dataloader = {
-            dataset: test_dataset[dataset].make_dataloader(
-                args.batch_size,
-                shuffle=False,
-                drop_last=False,
-                nr_workers=args.data_workers,
-            )
-            for dataset in test_dataset
-        }
+        #     test_dataloader = {
+        #         dataset: test_dataset[dataset].make_dataloader(
+        #             args.batch_size,
+        #             shuffle=False,
+        #             drop_last=False,
+        #             nr_workers=args.data_workers,
+        #         )
+        #         for dataset in test_dataset
+        #     }
 
-    if args.evaluate:
-        meters.reset()
-        model.eval()
-        validate_epoch(0, trainer, validation_dataloader, meters)
-        if test_dataset is not None:
-            for dataloader in test_dataloader:
-                validate_epoch(
-                    0,
-                    trainer,
-                    test_dataloader[dataloader],
-                    meters,
-                    meter_prefix=dataloader,
-                )
-        logger.critical(
-            meters.format_simple(
-                "Validation",
-                {k: v for k, v in meters.avg.items() if v != 0},
-                compressed=False,
-            )
+        # if args.evaluate:
+        #     meters.reset()
+        #     model.eval()
+        #     validate_epoch(args.start_epoch, trainer, validation_dataloader, meters)
+        #     if test_dataset is not None:
+        #         for dataloader in test_dataloader:
+        #             validate_epoch(
+        #                 args.start_epoch,
+        #                 trainer,
+        #                 test_dataloader[dataloader],
+        #                 meters,
+        #                 meter_prefix=dataloader,
+        #             )
+        # logger.critical(
+        #     meters.format_simple(
+        #         "Validation",
+        #         {k: v for k, v in meters.avg.items() if v != 0},
+        #         compressed=False,
+        #     )
+        # )
+        main_one_shot(
+            prototype_dataset,
+            one_shot_dataset,
+            model,
+            args.start_epoch,
+            trainer,
+            meters,
+            args.batch_size,
         )
+        if not args.debug:
+            meters.dump(args.meter_file)
+
         return meters
 
     # assert args.curriculum == 'off', 'Unimplemented feature: curriculum mode {}.'.format(args.curriculum)

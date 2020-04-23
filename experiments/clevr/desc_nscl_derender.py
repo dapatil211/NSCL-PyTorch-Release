@@ -81,14 +81,16 @@ class Model(ReasoningV1Model):
         feed_dict = GView(feed_dict)
         depth = feed_dict.depth
         depth = F.tanh(depth) * 0.5
-        inp = torch.cat((feed_dict.image, depth.unsqueeze(1)), axis=1)
+        inp = torch.cat((feed_dict.image, depth.unsqueeze(1)), axis=1).cuda()
         f_scene = self.resnet(inp)
-        f_sng = self.scene_graph(f_scene, feed_dict.objects, feed_dict.objects_length)
+        f_sng = self.scene_graph(
+            f_scene, feed_dict.objects.cuda(), feed_dict.objects_length.cuda()
+        )
         prototype_features = f_sng[0][1]
 
         attribute = feed_dict.attribute_name[0]
         concept = feed_dict.concept_name[0]
-        gdef.attribute_concepts[attribute].append(concept)
+        # gdef.attribute_concepts[attribute].append(concept)
         # self.scene_loss.used_concepts["attribute"][attribute].append(concept)
         attribute_taxonomy = self.reasoning.embedding_attribute
         attribute_taxonomy.init_concept(
